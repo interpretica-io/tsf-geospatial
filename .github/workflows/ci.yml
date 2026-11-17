@@ -1,0 +1,37 @@
+name: ci
+
+# The core of tsf-geospatial includes no Test Environment header, so it
+# builds and runs on its own: ci/core-test.sh builds it with ASan and
+# UBSan against the distribution's GEOS, PROJ and GDAL and checks it
+# against published references (IOGP Guidance Note 7-2, GeographicLib)
+# and closed forms. The TE glue, the RPCs and the engine TAPI are
+# exercised by tsf-geospatial-ts. The RPC boilerplate must be the one
+# ci/gen-rpc.py generates.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GEOS, PROJ, GDAL, libcurl
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libgeos-dev libproj-dev proj-data \
+            libgdal-dev gdal-data libcurl4-openssl-dev python3
+
+      - name: Generated RPC code is up to date
+        run: |
+          python3 ci/gen-rpc.py
+          git diff --exit-code
+
+      - name: Core contract tests (ASan/UBSan)
+        run: ./ci/core-test.sh
