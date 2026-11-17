@@ -103,7 +103,7 @@ struct tarpc_geo_{name}_out {{
     out.append("\nprogram geospatial\n{\n    version ver0\n    {\n")
     for name, _ in OPS:
         out.append(f"        RPC_DEF(geo_{name})\n")
-    out.append("    } = 1;\n} = 47;\n")
+    out.append("    } = 1;\n} = 49;\n")
     return "".join(out)
 
 def rpcs():

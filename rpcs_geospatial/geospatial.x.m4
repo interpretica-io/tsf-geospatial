@@ -789,4 +789,4 @@ program geospatial
         RPC_DEF(geo_ogc)
         RPC_DEF(geo_perf)
     } = 1;
-} = 47;
+} = 49;

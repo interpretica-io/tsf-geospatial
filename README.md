@@ -18,7 +18,7 @@ streaming pass on the agent.
 | Library | Runs on | What it is |
 |---|---|---|
 | `ta_geospatial` | Test Agent | The engine: plain C over GEOS, PROJ and GDAL. Its core (`ta_geo_core.h`) includes no TE header and is tested on its own (`ci/`). |
-| `rpcs_geospatial` | Agent RPC server | The `geo_*` RPCs (`geospatial.x.m4`, program 47). |
+| `rpcs_geospatial` | Agent RPC server | The `geo_*` RPCs (`geospatial.x.m4`, program 49). |
 | `tapi_geospatial` | Test Engine | The TAPI: geometries, CRS, datasets, rasters, tracks, generation, OGC, assertions with TE verdicts. |
 | `tapi_geospatial_postgis` | Test Engine | PostGIS checks over [tsf-sql](https://github.com/interpretica-io/tsf-sql) connections. Optional. |
 
