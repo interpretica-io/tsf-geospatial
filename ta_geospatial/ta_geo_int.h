@@ -284,6 +284,10 @@ extern void geo_gen_items_free(geo_gen_item *items, size_t n);
 extern GEOSGeometry *geo_ogr2geos(OGRGeometryH og, char **err);
 extern OGRGeometryH geo_geos2ogr(const GEOSGeometry *g);
 
+/** "EPSG:n" of an OGR spatial reference (best EPSG match when it has
+ * no code of its own), its WKT2 otherwise, "" for none. */
+extern void geo_srs_name(OGRSpatialReferenceH srs, char *out, size_t len);
+
 /** GEOS validity reason -> category ("self_intersection", ...). */
 extern const char *geo_validity_category(const char *reason);
 

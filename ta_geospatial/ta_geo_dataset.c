@@ -85,9 +85,9 @@ geo_geos2ogr(const GEOSGeometry *g)
     return og;
 }
 
-/* "EPSG:4326" of a spatial reference, or its PROJ string, or "". */
-static void
-srs_name(OGRSpatialReferenceH srs, char *out, size_t len)
+/* "EPSG:4326" of a spatial reference, or its WKT2, or "". */
+void
+geo_srs_name(OGRSpatialReferenceH srs, char *out, size_t len)
 {
     const char *auth;
     const char *code;
@@ -102,6 +102,31 @@ srs_name(OGRSpatialReferenceH srs, char *out, size_t len)
         OSRAutoIdentifyEPSG(srs);
         auth = OSRGetAuthorityName(srs, NULL);
         code = OSRGetAuthorityCode(srs, NULL);
+    }
+    if (auth == NULL || code == NULL)
+    {
+        /* No code in the file (HFA, some GML): the EPSG entry that
+         * matches the definition, when one matches with confidence. */
+        int nm = 0;
+        int *conf = NULL;
+        OGRSpatialReferenceH *m = OSRFindMatches(srs, NULL, &nm, &conf);
+
+        if (m != NULL && nm > 0 && conf[0] >= 90)
+        {
+            const char *a2 = OSRGetAuthorityName(m[0], NULL);
+            const char *c2 = OSRGetAuthorityCode(m[0], NULL);
+
+            if (a2 != NULL && c2 != NULL)
+            {
+                snprintf(out, len, "%s:%s", a2, c2);
+                OSRFreeSRSArray(m);
+                CPLFree(conf);
+                return;
+            }
+        }
+        if (m != NULL)
+            OSRFreeSRSArray(m);
+        CPLFree(conf);
     }
     if (auth != NULL && code != NULL)
         snprintf(out, len, "%s:%s", auth, code);
@@ -315,7 +340,7 @@ ds_info(geo_req *r)
         for (i = 0; i < n; i++)
         {
             lay = GDALDatasetGetLayer(d->ds, i);
-            srs_name(OGR_L_GetSpatialRef(lay), crs, sizeof(crs));
+            geo_srs_name(OGR_L_GetSpatialRef(lay), crs, sizeof(crs));
             if (i == 0)
                 snprintf(first, sizeof(first), "%s", crs);
             else if (strcmp(first, crs) != 0)
@@ -347,7 +372,7 @@ ds_info(geo_req *r)
         sb_kv_int(r->res, "fields", nf);
         sb_kv_str(r->res, "geometry_type",
                   OGRGeometryTypeToName(OGR_L_GetGeomType(lay)));
-        srs_name(OGR_L_GetSpatialRef(lay), crs, sizeof(crs));
+        geo_srs_name(OGR_L_GetSpatialRef(lay), crs, sizeof(crs));
         sb_kv_str(r->res, "crs", crs);
         sb_kv_str(r->res, "fid_column", OGR_L_GetFIDColumn(lay));
         for (i = 0; i < nf; i++)
@@ -399,7 +424,7 @@ ds_info(geo_req *r)
             return seterr(r->err, TA_GEO_ENOENT, "layer has no extent "
                           "(no geometries?)");
         put_extent(r->res, &e);
-        srs_name(OGR_L_GetSpatialRef(lay), crs, sizeof(crs));
+        geo_srs_name(OGR_L_GetSpatialRef(lay), crs, sizeof(crs));
         sb_kv_str(r->res, "crs", crs);
         return TA_GEO_OK;
     }
@@ -409,7 +434,7 @@ ds_info(geo_req *r)
         char *wkt = NULL;
         const char *opts[] = { "FORMAT=WKT2_2019", NULL };
 
-        srs_name(s, crs, sizeof(crs));
+        geo_srs_name(s, crs, sizeof(crs));
         sb_kv_str(r->res, "crs", crs);
         if (s != NULL)
         {
@@ -496,7 +521,7 @@ ds_fetch(geo_req *r)
     lay = get_layer(r, d, "layer");
     if (lay == NULL)
         return TA_GEO_ENOENT;
-    srs_name(OGR_L_GetSpatialRef(lay), crs, sizeof(crs));
+    geo_srs_name(OGR_L_GetSpatialRef(lay), crs, sizeof(crs));
 
     if (strcmp(r->kind, "geometry") == 0)
     {
@@ -881,7 +906,7 @@ ds_validate(geo_req *r)
 
     /* Dataset-level checks: CRS against the expectation and across the
      * layers, the schema. */
-    srs_name(OGR_L_GetSpatialRef(lay), crs, sizeof(crs));
+    geo_srs_name(OGR_L_GetSpatialRef(lay), crs, sizeof(crs));
     if (want_crs != NULL)
     {
         char norm[256];
@@ -912,7 +937,7 @@ ds_validate(geo_req *r)
 
             if (l2 == lay)
                 continue;
-            srs_name(OGR_L_GetSpatialRef(l2), other, sizeof(other));
+            geo_srs_name(OGR_L_GetSpatialRef(l2), other, sizeof(other));
             if (strcmp(other, crs) != 0)
                 vissue(&v, V_CRS, -1, "", "layer %s is in '%s', this layer "
                        "in '%s'", OGR_L_GetName(l2), other, crs);
@@ -1126,8 +1151,8 @@ ds_compare(geo_req *r)
                           "%s", id_field, ida < 0 ? "A" : "B");
     }
 
-    srs_name(OGR_L_GetSpatialRef(la), ca, sizeof(ca));
-    srs_name(OGR_L_GetSpatialRef(lb), cb, sizeof(cb));
+    geo_srs_name(OGR_L_GetSpatialRef(la), ca, sizeof(ca));
+    geo_srs_name(OGR_L_GetSpatialRef(lb), cb, sizeof(cb));
     if (strcmp(ca, cb) != 0)
     {
         PJ *pa = ca[0] != '\0' ? geo_crs_create(ca, NULL) : NULL;
@@ -1374,6 +1399,9 @@ ds_compare(geo_req *r)
         {
             const char *nm = OGR_Fld_GetNameRef(OGR_FD_GetFieldDefn(defa, i));
 
+            /* With a list, only the listed fields are compared. */
+            if (strcmp(attrs, "all") != 0 && !type_allowed(attrs, nm))
+                continue;
             if (OGR_FD_GetFieldIndex(defb, nm) < 0)
             {
                 adiff++;
@@ -1384,6 +1412,9 @@ ds_compare(geo_req *r)
         {
             const char *nm = OGR_Fld_GetNameRef(OGR_FD_GetFieldDefn(defb, i));
 
+            /* With a list, only the listed fields are compared. */
+            if (strcmp(attrs, "all") != 0 && !type_allowed(attrs, nm))
+                continue;
             if (OGR_FD_GetFieldIndex(defa, nm) < 0)
             {
                 adiff++;
@@ -1595,6 +1626,11 @@ geo_ds_write_items(const char *path, const char *driver, const char *crs,
         }
         OSRSetAxisMappingStrategy(srs, OAMS_TRADITIONAL_GIS_ORDER);
     }
+    /* GeoJSONSeq follows RFC 7946 and keeps 7 decimals by default:
+     * written test data must read back as generated. */
+    if (strcmp(driver, "GeoJSONSeq") == 0 &&
+        CSLFetchNameValue(lco, "COORDINATE_PRECISION") == NULL)
+        lco = CSLSetNameValue(lco, "COORDINATE_PRECISION", "15");
     lay = GDALDatasetCreateLayer(ds, layer, srs, gt, lco);
     CSLDestroy(lco);
     if (srs != NULL)

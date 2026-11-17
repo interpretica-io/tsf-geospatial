@@ -36,23 +36,9 @@ get_raster(geo_req *r, int h)
 static void
 srs_of(GDALDatasetH ds, char *out, size_t len)
 {
-    OGRSpatialReferenceH s = GDALGetSpatialRef(ds);
-    const char *a, *c;
-
-    out[0] = '\0';
-    if (s == NULL)
-        return;
-    a = OSRGetAuthorityName(s, NULL);
-    c = OSRGetAuthorityCode(s, NULL);
-    if (a == NULL || c == NULL)
-    {
-        OSRAutoIdentifyEPSG(s);
-        a = OSRGetAuthorityName(s, NULL);
-        c = OSRGetAuthorityCode(s, NULL);
-    }
-    if (a != NULL && c != NULL)
-        snprintf(out, len, "%s:%s", a, c);
-    else
+    geo_srs_name(GDALGetSpatialRef(ds), out, len);
+    if (out[0] != '\0' && strncmp(out, "EPSG:", 5) != 0 &&
+        strchr(out, ':') == NULL)
         snprintf(out, len, "%s", "custom");
 }
 
