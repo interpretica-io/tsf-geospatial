@@ -10,9 +10,10 @@
  * Validity guarantees (each item says what it is in "expect"):
  *  - points, grid, boundary, lines, trajectory: valid by construction.
  *  - polygons: star-shaped around their centre with strictly increasing
- *    vertex angles, so every ring is simple; a hole, when asked for, is
- *    a star around the same centre whose largest radius is under the
- *    shell's smallest, wound the other way. Always valid.
+ *    vertex angles, so every ring is simple; a hole, when asked for and
+ *    the shell has 4 or more vertices, is a star around the same centre
+ *    inside the circle the shell's edges never cross, wound the other
+ *    way. Always valid.
  *  - invalid: only with allow_invalid=1, and each item carries the
  *    defect category the validator must report for it.
  *  - outliers: valid points; "expect" is "outlier" for the planted ones.
@@ -99,11 +100,12 @@ star_ring(sbuf *b, geo_rng *r, double cx, double cy, double rmin,
         b->oom = true;
         return;
     }
-    /* Angles: k equal sectors, one jittered angle inside each, so they
-     * strictly increase. */
+    /* Angles: k equal sectors, one jittered angle in the middle half of
+     * each, so they strictly increase and no two neighbours are more
+     * than 1.5 sectors apart. */
     for (i = 0; i < k; i++)
     {
-        ang[i] = (i + 0.1 + 0.8 * geo_rng_unit(r)) * 2 * M_PI / k;
+        ang[i] = (i + 0.25 + 0.5 * geo_rng_unit(r)) * 2 * M_PI / k;
         rad[i] = geo_rng_range(r, rmin, rmax);
     }
     sb_puts(b, "(");
@@ -463,13 +465,23 @@ geo_generate(const char *kind, kv *o, geo_gen_item **items, size_t *n,
             double cy = geo_rng_range(&r, b[1] + radius, b[3] - radius);
             sbuf t = SBUF_INIT;
 
+            /*
+             * The shell's edges come no closer to the centre than
+             * rmin * cos(0.75 * 2 pi / k) (neighbouring vertices are at
+             * most 1.5 sectors apart): a hole inside 90% of that circle
+             * lies inside the shell. A triangle has no such circle and
+             * gets no hole.
+             */
+            double inner = 0.5 * radius * cos(0.75 * 2 * M_PI / (double)verts)
+                           * 0.9;
+
             sb_puts(&t, "POLYGON (");
             star_ring(&t, &r, cx, cy, radius * 0.5, radius, (int)verts, true);
-            if (holes)
+            if (holes && inner > 0.05 * radius)
             {
                 sb_puts(&t, ", ");
-                star_ring(&t, &r, cx, cy, radius * 0.1, radius * 0.4,
-                          (int)(verts < 4 ? 3 : verts / 2 + 1), false);
+                star_ring(&t, &r, cx, cy, inner * 0.3, inner,
+                          (int)(verts < 6 ? 3 : verts / 2 + 1), false);
             }
             sb_puts(&t, ")");
             add(&g, "wkt", "valid", 0, &t);

@@ -391,6 +391,8 @@ raster_compare(geo_req *r)
         (rc = kv_dbl(r->opt, "geotransform_tolerance", 1e-9, &gt_tol,
                      r->err)) != 0)
         return rc;
+    /* Read now: a size mismatch ends the comparison before any tile. */
+    kv_get(r->opt, "tile");
 
 #define META(_cond, ...) \
     do {                                                        \

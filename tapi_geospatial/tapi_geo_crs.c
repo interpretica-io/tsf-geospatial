@@ -103,6 +103,14 @@ tapi_geo_crs_compare(rcf_rpc_server *rpcs, const char *a, const char *b,
     te_errno rc;
 
     te_string_append(&p, "other=%s", b);
+    /* An option is one line; WKT reads the same with spaces. */
+    {
+        char *c;
+
+        for (c = p.ptr; c != NULL && *c != '\0'; c++)
+            if (*c == '\n' || *c == '\r')
+                *c = ' ';
+    }
     rc = tapi_geo_call(rpcs, TAPI_GEO_RPC_CRS_INFO, 0, 0, "compare", a, p.ptr,
                        &r);
     if (rc == 0)

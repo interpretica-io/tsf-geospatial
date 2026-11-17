@@ -734,6 +734,126 @@ op_info(geo_req *r)
     return TA_GEO_OK;
 }
 
+static void
+gj_num(sbuf *b, double v, int prec)
+{
+    if (prec >= 0)
+        sb_printf(b, "%.*g", prec > 0 ? prec : 1, v);
+    else
+        sb_num(b, v);
+}
+
+static void
+gj_seq(sbuf *b, const GEOSGeometry *g, int prec)
+{
+    GEOSContextHandle_t h = geo_geos();
+    const GEOSCoordSequence *s = GEOSGeom_getCoordSeq_r(h, g);
+    bool z = GEOSHasZ_r(h, g) == 1;
+    unsigned int n = 0;
+    unsigned int i;
+    bool point = GEOSGeomTypeId_r(h, g) == GEOS_POINT;
+
+    GEOSCoordSeq_getSize_r(h, s, &n);
+    if (!point)
+        sb_puts(b, "[");
+    for (i = 0; i < n; i++)
+    {
+        double x, y, zz = 0;
+
+        GEOSCoordSeq_getXY_r(h, s, i, &x, &y);
+        sb_puts(b, i > 0 ? ",[" : "[");
+        gj_num(b, x, prec);
+        sb_puts(b, ",");
+        gj_num(b, y, prec);
+        if (z)
+        {
+            GEOSCoordSeq_getOrdinate_r(h, s, i, 2, &zz);
+            sb_puts(b, ",");
+            gj_num(b, zz, prec);
+        }
+        sb_puts(b, "]");
+    }
+    if (!point)
+        sb_puts(b, "]");
+}
+
+static void
+gj_poly(sbuf *b, const GEOSGeometry *g, int prec)
+{
+    GEOSContextHandle_t h = geo_geos();
+    int n = GEOSGetNumInteriorRings_r(h, g);
+    int i;
+
+    sb_puts(b, "[");
+    if (GEOSisEmpty_r(h, g) != 1)
+    {
+        gj_seq(b, GEOSGetExteriorRing_r(h, g), prec);
+        for (i = 0; i < n; i++)
+        {
+            sb_puts(b, ",");
+            gj_seq(b, GEOSGetInteriorRingN_r(h, g, i), prec);
+        }
+    }
+    sb_puts(b, "]");
+}
+
+static void
+geojson_geom(sbuf *b, const GEOSGeometry *g, int prec)
+{
+    GEOSContextHandle_t h = geo_geos();
+    int t = GEOSGeomTypeId_r(h, g);
+    int n = GEOSGetNumGeometries_r(h, g);
+    bool empty = GEOSisEmpty_r(h, g) == 1;
+    int i;
+
+    sb_printf(b, "{\"type\":\"%s\",",
+              t == GEOS_LINEARRING ? "LineString" : geo_type_name(t));
+    switch (t)
+    {
+        case GEOS_POINT:
+        case GEOS_LINESTRING:
+        case GEOS_LINEARRING:
+            sb_puts(b, "\"coordinates\":");
+            if (empty)
+                sb_puts(b, "[]");
+            else
+                gj_seq(b, g, prec);
+            break;
+        case GEOS_POLYGON:
+            sb_puts(b, "\"coordinates\":");
+            gj_poly(b, g, prec);
+            break;
+        case GEOS_MULTIPOINT:
+        case GEOS_MULTILINESTRING:
+        case GEOS_MULTIPOLYGON:
+            sb_puts(b, "\"coordinates\":[");
+            for (i = 0; i < n && !empty; i++)
+            {
+                const GEOSGeometry *p = GEOSGetGeometryN_r(h, g, i);
+
+                if (i > 0)
+                    sb_puts(b, ",");
+                if (t == GEOS_MULTIPOLYGON)
+                    gj_poly(b, p, prec);
+                else
+                    gj_seq(b, p, prec);
+            }
+            sb_puts(b, "]");
+            break;
+        default:
+            sb_puts(b, "\"geometries\":[");
+            for (i = 0; i < n && !empty; i++)
+            {
+                if (i > 0)
+                    sb_puts(b, ",");
+                geojson_geom(b, GEOSGetGeometryN_r(h, g, i), prec);
+            }
+            sb_puts(b, "]");
+            break;
+    }
+    sb_puts(b, "}");
+}
+
 static int
 op_serialize(geo_req *r)
 {
@@ -798,26 +918,11 @@ op_serialize(geo_req *r)
     }
     else if (strcmp(r->kind, "geojson") == 0)
     {
-        /* Through OGR, which writes Z; GeoJSON has no M. */
-        OGRGeometryH og;
-        char *s;
-        char sig[32];
-        char *opts[2] = { sig, NULL };
-
-        geo_gdal_init();
-        og = geo_geos2ogr(o->g);
-        if (og == NULL)
-            return seterr(r->err, TA_GEO_EFAIL, "GeoJSON: no OGR geometry");
-        snprintf(sig, sizeof(sig), "SIGNIFICANT_FIGURES=%d",
-                 prec >= 0 ? (int)prec : 17);
-        s = OGR_G_ExportToJsonEx(og, opts);
-        OGR_G_DestroyGeometry(og);
-        if (s == NULL)
-            return seterr(r->err, TA_GEO_EFAIL, "GeoJSON writer: %s",
-                          geo_gdal_err());
-        sb_puts(r->rep, s);
-        sb_kv_int(r->res, "bytes", (long long)strlen(s));
-        CPLFree(s);
+        /* Written here: GEOS's writer drops Z before 3.14 and OGR's
+         * rounds to 15 digits. Every number reads back exactly; Z is
+         * kept, M dropped (GeoJSON has no M). */
+        geojson_geom(r->rep, o->g, (int)prec);
+        sb_kv_int(r->res, "bytes", (long long)r->rep->len);
     }
     else
     {

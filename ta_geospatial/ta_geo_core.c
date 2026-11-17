@@ -203,6 +203,11 @@ geo_gdal_init(void)
     CPLSetConfigOption("GDAL_HTTP_TIMEOUT", "30");
     CPLSetConfigOption("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", "NONE");
     CPLSetConfigOption("OGR_GEOJSON_MAX_OBJ_SIZE", "200");
+    /* GDAL caches raster blocks up to 5% of RAM by default: on a big
+     * host a tiled pass over a large image would still hold most of it.
+     * Bound it (config gdal_cache_mb), unless the environment says. */
+    if (getenv("GDAL_CACHEMAX") == NULL)
+        GDALSetCacheMax64((GIntBig)64 * 1024 * 1024);
     gdal_ready = true;
 }
 
@@ -686,6 +691,18 @@ op_config(geo_req *r)
             return rc;
         proj_context_set_enable_network(geo_proj(), net);
     }
+    v = kv_get(r->opt, "gdal_cache_mb");
+    if (v != NULL)
+    {
+        long long mb;
+
+        if ((rc = kv_long(r->opt, "gdal_cache_mb", 64, &mb, r->err)) != 0)
+            return rc;
+        if (mb < 1)
+            return seterr(r->err, TA_GEO_EINVAL, "gdal_cache_mb >= 1");
+        geo_gdal_init();
+        GDALSetCacheMax64((GIntBig)mb * 1024 * 1024);
+    }
     v = kv_get(r->opt, "proj_data");
     if (v != NULL)
     {
@@ -707,6 +724,9 @@ op_config(geo_req *r)
     sb_kv_int(r->res, "max_pixels", l.max_pixels);
     sb_kv_int(r->res, "proj_network",
               proj_context_is_network_enabled(geo_proj()));
+    if (gdal_ready)
+        sb_kv_int(r->res, "gdal_cache_mb",
+                  (long long)(GDALGetCacheMax64() / (1024 * 1024)));
     return TA_GEO_OK;
 }
 
